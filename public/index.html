@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Conference</title>
+    <style>
+        #video {
+            width: 100%;
+            height: 100%;
+            background-color: black;
+            display: flex;
+            flex-direction: row;
+        }
+        video {
+            width: 50%;
+            height: 100%;
+        }
+    </style>
+</head>
+<body>
+    <div id="video"></div>
+    <script src="https://cdn.jsdelivr.net/npm/simple-peer@9.11.1/simplepeer.min.js"></script>
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+        let localStream;
+        let peers = {};
+
+        async function getMediaStream() {
+            try {
+                localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                const localVideo = document.createElement('video');
+                localVideo.srcObject = localStream;
+                localVideo.autoplay = true;
+                localVideo.muted = true; // Ensure no feedback loop
+                document.getElementById('video').appendChild(localVideo);
+
+                console.log('Got media stream, emitting ready');
+                socket.emit('ready', { id: socket.id });
+            } catch (err) {
+                console.error('Error accessing media devices:', err);
+            }
+        }
+
+        function createPeer(userId, initiator) {
+            const peer = new SimplePeer({
+                initiator: initiator,
+                stream: localStream,
+                trickle: false
+            });
+
+            peer.on('signal', (data) => {
+                console.log('Sending signal:', data);
+                socket.emit('signal', { signal: data, to: userId });
+            });
+
+            peer.on('stream', (stream) => {
+                console.log('Received remote stream');
+                const remoteVideo = document.createElement('video');
+                remoteVideo.srcObject = stream;
+                remoteVideo.autoplay = true;
+                document.getElementById('video').appendChild(remoteVideo);
+            });
+
+            peer.on('connect', () => {
+                console.log('Peer connection established with', userId);
+            });
+
+            peer.on('error', (err) => {
+                console.error('Peer error:', err);
+            });
+
+            peers[userId] = peer;
+        }
+
+        socket.on('user-ready', (data) => {
+            console.log('Received user-ready:', data);
+            createPeer(data.id, true);
+        });
+
+        socket.on('signal', (data) => {
+            console.log('Received signal:', data);
+            if (!peers[data.from]) {
+                createPeer(data.from, false);
+            }
+            peers[data.from].signal(data.signal);
+        });
+
+        getMediaStream();
+    </script>
+</body>
+</html>
